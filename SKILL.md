@@ -174,9 +174,11 @@ def run_phone_task(task: str, max_steps: int = 50,
 
 也可通过环境变量 `PHONE_AGENT_URL` 显式指定地址。
 
-> ⚠️ **必须用 Python SDK 封装，不要手动 curl + sleep 轮询。**
-> curl 轮询每次起 HTTP 连接开销大，sleep 间隔太长浪费 time，太短浪费调用次数。
-> 把上面的 `run_phone_task()` 函数复制到你的代码里直接用。
+> 🚫 **绝对禁止手动 curl + sleep 轮询！**
+> 
+> curl 每次起连接开销大、sleep 间隔不可控、浪费工具调用配额。
+> **必须用上面的 Python `run_phone_task()` 函数**——异步轮询、自动取消、永不超时。
+> 复制粘贴到你的代码里直接用，不要自己发明轮询逻辑。
 
 ### max_steps 建议
 
