@@ -18,11 +18,15 @@ _LOOP_SIMILARITY_THRESHOLD = 0.6
 
 
 def _thinking_similarity(a: str, b: str) -> float:
-    """Compute Jaccard similarity between two thinking texts."""
+    """Compute character-bigram Jaccard similarity between two thinking texts.
+    Uses bigrams to work across languages (Chinese has no word boundaries)."""
     if not a or not b:
         return 0.0
-    words_a = set(a.lower().split())
-    words_b = set(b.lower().split())
+    def bigrams(text: str) -> set[str]:
+        text = text.lower()
+        return {text[i : i + 2] for i in range(len(text) - 1)}
+    words_a = bigrams(a)
+    words_b = bigrams(b)
     if not words_a or not words_b:
         return 0.0
     intersection = words_a & words_b
