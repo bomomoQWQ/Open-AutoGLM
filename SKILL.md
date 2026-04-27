@@ -171,8 +171,9 @@ def run_phone_task(task: str, max_steps: int = 50,
         while True:
             elapsed = time.time() - started
             if elapsed > total_timeout:
-                requests.delete(f"{BASE_URL}/api/tasks/{task_id}", timeout=5)
-                return {"status": "timeout", "result": f"Task timed out after {total_timeout}s", "steps": 0}
+                return {"status": "timeout", "task_id": task_id,
+                        "result": f"Task still running after {total_timeout}s, use task_id to poll again",
+                        "steps": data.get("steps", 0)}
 
             r = requests.get(f"{BASE_URL}/api/tasks/{task_id}", timeout=10)
             r.raise_for_status()
@@ -189,6 +190,24 @@ def run_phone_task(task: str, max_steps: int = 50,
 ```
 
 > **直接复制上面函数**，不要自己写轮询逻辑。已经加了 total_timeout 保护、task_id 打印、异常自动取消。
+
+### 断连恢复
+
+异步任务在服务器后台运行，与 HTTP 连接无关。即使调用方进程被 kill、沙箱超时，任务仍在执行。**只要有 task_id，随时随地可追回**：
+
+```python
+# 续查已有任务（无需重新发起）
+def resume_task(task_id):
+    r = requests.get(f"{BASE_URL}/api/tasks/{task_id}", timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    return data  # {"status": "finished"/"running"/..., "result": "...", "steps": N}
+
+# 或直接取消
+def cancel_task(task_id):
+    r = requests.delete(f"{BASE_URL}/api/tasks/{task_id}", timeout=5)
+    return r.json()
+```
 
 也可通过环境变量 `PHONE_AGENT_URL` 显式指定地址。
 
