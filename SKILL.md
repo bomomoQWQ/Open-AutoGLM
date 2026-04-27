@@ -1,8 +1,42 @@
 # Phone Agent Skill
 
-Phone Agent 是一个手机自动化工具。上级 AI Agent 通过 HTTP API 下发自然语言任务，Phone Agent 接管手机完成操作后返回结果。
+Phone Agent 是一个手机自动化任务执行器。上级 AI Agent 通过 HTTP API 下发**手机操作任务**，Phone Agent 自动操控手机完成并返回结果。
 
-> **推荐使用异步任务 API**，避免复杂任务因超时中断。
+## ⚠️ 核心原理（必读）
+
+> Phone Agent **不是截图工具**，不是文件管理器，不是系统命令执行器。
+> 
+> Phone Agent 的工作方式：截图 → VLM 看图 → 输出点击/滑动/打字 → ADB 执行 → 循环。
+> 
+> 截图是 Agent **内部用来分析画面的**，不是对外输出。它**无法**像 `adb screencap` 那样把截图文件返回给调用方。
+
+### ✅ 正确的任务（自然语言手机操作）
+
+| 任务 | 效果 |
+|---|---|
+| `打开微信给张三发消息：晚上吃饭` | 自动化操作手机完成 |
+| `打开淘宝搜索无线耳机加入购物车` | 自动化操作手机完成 |
+| `打开设置连接 WiFi 名为 guest-2.4G` | 自动化操作手机完成 |
+| `打开小红书搜索成都美食攻略` | 自动化操作手机完成 |
+| `帮我打开Chrome` | 自动化操作手机完成 |
+
+### ❌ 错误的用法（这些做不到）
+
+| 错误任务 | 为什么不行 |
+|---|---|
+| `截图`、`截取屏幕`、`返回桌面并截屏` | 这不是截图工具，截图是内部用的 |
+| `获取截图文件保存到 /sdcard/xx.png` | 没有文件保存能力 |
+| `列出桌面上的应用图标` | 这不是 OCR/描述工具 |
+| `adb shell screencap` | 不能执行 ADB 命令 |
+| `调用某某 API` | 没有 API 调用功能 |
+
+### 任务公式
+
+```
+打开{App名} 做{具体操作}
+```
+
+任务必须是**用户想让手机做的事**，不是计算机指令。上级 Agent 把用户意图翻译成手机操作任务下发即可。
 
 ## ⚠️ 地址配置（重要）
 
@@ -11,7 +45,7 @@ Phone Agent 使用 `--network host`，占宿主机端口。上级 Agent 连 Phon
 | 上级 Agent 在哪 | 用的地址 |
 |---|---|
 | Docker 同宿主机 | `172.17.0.1:8002`（默认 bridge 网关）或宿主机内网 IP |
-| Docker（自定义网络） | `docker inspect bridge \| grep Gateway` 查网关 IP |
+| Docker（自定义网络） | `docker inspect bridge | grep Gateway` 查网关 IP |
 | 非 Docker / 同机 | `localhost:8002` |
 | 远程 | 宿主机内网 IP，如 `192.168.1.100:8002` |
 
@@ -36,11 +70,9 @@ curl http://<host>:8002/api/health
 {"status": "ok", "adb_available": true, "device_connected": true, "model_configured": true}
 ```
 
-`status` 为 `ok` 时可执行任务，`degraded` 表示组件异常。
-
 ### 异步任务（推荐 ⭐）
 
-复杂任务走走停停可能要几分钟，同步阻塞容易超时。异步 API 三步解决：
+长任务不会超时，可随时取消。
 
 **1. 启动任务 → 秒回 task_id**
 
@@ -61,10 +93,9 @@ curl http://<host>:8002/api/tasks/a1b2c3d4e5f6
 ```
 
 ```json
-// 进行中
 {"task_id": "a1b2c3d4e5f6", "status": "running", "steps": 3, "result": null}
-
-// 完成
+```
+```json
 {"task_id": "a1b2c3d4e5f6", "status": "finished", "steps": 6, "result": "消息已发送"}
 ```
 
@@ -74,11 +105,7 @@ curl http://<host>:8002/api/tasks/a1b2c3d4e5f6
 curl -X DELETE http://<host>:8002/api/tasks/a1b2c3d4e5f6
 ```
 
-```json
-{"task_id": "a1b2c3d4e5f6", "status": "cancelling"}
-```
-
-任务状态枚举：`pending` → `running` → `finished` / `error` / `cancelled`
+状态枚举：`pending` → `running` → `finished` / `error` / `cancelled`
 
 ### 同步执行（简单任务可用）
 
@@ -92,7 +119,7 @@ curl -X POST http://<host>:8002/api/run \
 {"success": true, "result": "已打开设置", "steps": 2}
 ```
 
-⚠️ 任务超过 HTTP 超时时间会断开，建议只在快速任务使用。
+⚠️ 任务超过 HTTP 超时会断开，建议只用快速任务。
 
 ### Python 调用示例
 
@@ -101,10 +128,9 @@ import requests
 import time
 import os
 
-# 自动检测地址：Docker 环境用 bridge 网关，否则用 localhost
 def _get_base_url():
     if os.path.exists("/.dockerenv"):
-        return "http://172.17.0.1:8002"   # Docker bridge 网关
+        return "http://172.17.0.1:8002"
     return "http://localhost:8002"
 
 BASE_URL = os.getenv("PHONE_AGENT_URL", _get_base_url())
@@ -112,14 +138,12 @@ BASE_URL = os.getenv("PHONE_AGENT_URL", _get_base_url())
 def run_phone_task(task: str, max_steps: int = 50,
                    poll_interval: float = 3.0) -> dict:
     """异步执行手机任务，轮询等待完成。"""
-    # 1. 启动
     r = requests.post(f"{BASE_URL}/api/tasks",
                       json={"task": task, "max_steps": max_steps},
                       timeout=10)
     r.raise_for_status()
     task_id = r.json()["task_id"]
 
-    # 2. 轮询
     try:
         while True:
             r = requests.get(f"{BASE_URL}/api/tasks/{task_id}", timeout=10)
@@ -148,7 +172,8 @@ def run_phone_task(task: str, max_steps: int = 50,
 
 ## 注意事项
 
-1. 任务描述尽量具体，包含目标 App 和期望操作
-2. 登录、支付等敏感操作会触发人工接管，无人响应时会失败
-3. 任务间串行执行，不要并发调用
-4. 上级 Agent 检测到步骤长时间无进展可主动 DELETE 取消
+1. 任务描述用自然语言，说清楚要打开什么 App、做什么操作
+2. Phone Agent **不是截图工具**——不要发截图、截屏、获取屏幕、保存文件类任务
+3. 登录、支付等敏感操作会触发人工接管，无人响应时会失败
+4. 任务间串行执行，不要并发调用
+5. 上级 Agent 检测到步骤长时间无进展可主动 DELETE 取消
