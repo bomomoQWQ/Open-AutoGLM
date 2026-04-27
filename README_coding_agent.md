@@ -4,13 +4,13 @@
 <img src=resources/logo.svg width="20%"/>
 </div>
 
-> **本文专为 AI 助手（如 Claude Code）阅读，用于自动化部署 Open-AutoGLM。**
+> **本文专为 AI 助手（如 Claude Code）阅读，用于自动化部署 Open-AutoGLM（Docker 版）。**
 >
-> **This document is designed for AI assistants (such as Claude Code) to automate the deployment of Open-AutoGLM.**
+> **This document is designed for AI assistants (such as Claude Code) to automate the deployment of Open-AutoGLM (Docker edition).**
 >
-> 如果你是人类读者，可以跳过本文，按照 README.md 文档操作即可。
+> 如果你是人类读者，可以跳过本文，按照 [README.md](README.md) 操作即可。
 >
-> If you are a human reader, you can skip this document and follow the README.md instructions instead.
+> If you are a human reader, you can skip this document and follow [README.md](README.md) instead.
 
 ---
 
@@ -23,408 +23,226 @@
 
 # English
 
-## Prerequisites
+## Overview
 
-### 1. Python Environment
+Open-AutoGLM is a phone automation agent. The user says "Open WeChat and send a message to John", and the agent controls the Android phone to complete the task.
 
-Python 3.10 or higher is required.
+**Architecture**: Screenshot → Vision Model → Action (Tap/Swipe/Type) → ADB Execute → Loop
 
-### 2. ADB (Android Debug Bridge)
+This fork adds Docker support and HTTP API, making it suitable as a skill/tool for upstream AI agents.
 
-1. Download the official ADB [installation package](https://developer.android.com/tools/releases/platform-tools)
-2. Extract and configure environment variables:
+## Deployment Steps
 
-**macOS:**
+### 1. Pre-flight Checklist
 
-```bash
-# Assuming extracted to ~/Downloads/platform-tools
-export PATH=${PATH}:~/Downloads/platform-tools
-```
+Ask the user to confirm:
 
-**Windows:** Add the extracted folder path to your system PATH. Refer to [this tutorial](https://blog.csdn.net/x2584179909/article/details/108319973) if needed.
+- [ ] An Android phone (7.0+) with USB cable (data-capable, not charge-only)
+- [ ] Developer Mode enabled (Settings → About → tap Build Number 7x)
+- [ ] USB Debugging enabled (Settings → Developer Options → USB Debugging)
+- [ ] USB Debugging (Security Settings) enabled (some devices)
+- [ ] ADB Keyboard installed: https://github.com/senzhk/ADBKeyBoard/blob/master/ADBKeyboard.apk
+- [ ] A vision-language model API endpoint (any OpenAI-compatible VLM: GPT-4o, qwen-vl, AutoGLM-Phone-9B, etc.)
 
-### 3. Android Device Setup
-
-Requirements:
-- Android 7.0+ device or emulator
-- Developer Mode enabled
-- USB Debugging enabled
-
-**Enable Developer Mode:**
-1. Go to `Settings > About Phone > Build Number`
-2. Tap rapidly about 10 times until "Developer mode enabled" appears
-
-**Enable USB Debugging:**
-1. Go to `Settings > Developer Options > USB Debugging`
-2. Enable the toggle
-3. Some devices may require a restart
-
-**Important permissions to check:**
-
-![Permissions](resources/screenshot-20251210-120416.png)
-
-### 4. Install ADB Keyboard
-
-Download and install [ADB Keyboard APK](https://github.com/senzhk/ADBKeyBoard/blob/master/ADBKeyboard.apk) on your device.
-
-After installation, enable it in `Settings > Input Method` or `Settings > Keyboard List`.
-
----
-
-## Installation
+### 2. Host Machine Setup (Linux)
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install ADB
+sudo apt install adb -y
 
-# Install package
-pip install -e .
-```
+# Start ADB server
+adb start-server
 
----
-
-## ADB Configuration
-
-**Ensure your USB cable supports data transfer (not charging only).**
-
-### Verify Connection
-
-```bash
-# Check connected devices
+# Connect phone via USB, verify
 adb devices
+# Expected:  XXXXXXXX    device
 
-# Expected output:
-# List of devices attached
-# emulator-5554   device
+# Enable ADB Keyboard
+adb shell ime enable com.android.adbkeyboard/.AdbIME
 ```
 
-### Remote Debugging (WiFi)
-
-Ensure your phone and computer are on the same WiFi network.
-
-![Enable Wireless Debugging](resources/screenshot-20251210-120630.png)
+### 3. Run Container
 
 ```bash
-# Connect via WiFi (replace with your phone's IP and port)
-adb connect 192.168.1.100:5555
+docker pull bomomo/phone-agent:latest
 
-# Verify connection
-adb devices
+docker run -d --network host \
+  --name phone-agent \
+  --restart unless-stopped \
+  -e PYTHONUNBUFFERED=1 \
+  -e PHONE_AGENT_PORT=8002 \
+  -e PHONE_AGENT_ENABLE_THINKING=true \
+  -e PHONE_AGENT_BASE_URL=<MODEL_API_URL> \
+  -e PHONE_AGENT_MODEL=<MODEL_NAME> \
+  -e PHONE_AGENT_API_KEY=<API_KEY> \
+  bomomo/phone-agent:latest
 ```
 
-### Device Management
+### 4. Verify
 
 ```bash
-# List all devices
-adb devices
-
-# Connect remote device
-adb connect <ip>:<port>
-
-# Disconnect device
-adb disconnect <ip>:<port>
+curl http://localhost:8002/api/health
+# → {"status":"ok","adb_available":true,"device_connected":true,"model_configured":true}
 ```
 
----
-
-## Usage
-
-### Command Line
+### 5. Run a Task
 
 ```bash
-# Interactive mode
-python main.py --base-url <MODEL_API_URL> --model <MODEL_NAME>
+# Async (recommended for complex tasks)
+curl -X POST http://localhost:8002/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"打开微信给文件传输助手发消息：部署成功"}'
 
-# Execute specific task
-python main.py --base-url <MODEL_API_URL> "Open Chrome browser"
-
-# Use API key authentication
-python main.py --apikey sk-xxxxx
-
-# English system prompt
-python main.py --lang en --base-url <MODEL_API_URL> "Open Chrome browser"
-
-# List supported apps
-python main.py --list-apps
-
-# Specify device
-python main.py --device-id 192.168.1.100:5555 --base-url <MODEL_API_URL> "Open TikTok"
+# Sync (quick tasks)
+curl -X POST http://localhost:8002/api/run \
+  -H "Content-Type: application/json" \
+  -d '{"task":"打开微信给文件传输助手发消息：部署成功"}'
 ```
 
-### Python API
+## API Reference
 
-```python
-from phone_agent import PhoneAgent
-from phone_agent.model import ModelConfig
-
-# Configure model
-model_config = ModelConfig(
-    base_url="<MODEL_API_URL>",
-    model_name="<MODEL_NAME>",
-)
-
-# Create Agent
-agent = PhoneAgent(model_config=model_config)
-
-# Execute task
-result = agent.run("Open eBay and search for wireless earbuds")
-print(result)
-```
-
----
+See [SKILL.md](SKILL.md) for full API documentation and Python integration examples.
 
 ## Environment Variables
 
-| Variable                  | Description               | Default                      |
-|---------------------------|---------------------------|------------------------------|
-| `PHONE_AGENT_BASE_URL`    | Model API URL             | `http://localhost:8000/v1`   |
-| `PHONE_AGENT_MODEL`       | Model name                | `autoglm-phone-9b`           |
-| `PHONE_AGENT_API_KEY`     | API key                   | `EMPTY`                      |
-| `PHONE_AGENT_MAX_STEPS`   | Max steps per task        | `100`                        |
-| `PHONE_AGENT_DEVICE_ID`   | ADB device ID             | (auto-detect)                |
-| `PHONE_AGENT_LANG`        | Language (`cn`/`en`)      | `cn`                         |
-
----
+| Variable | Required | Description | Default |
+|---|---|---|---|
+| `PHONE_AGENT_BASE_URL` | Yes | Model API URL | `http://localhost:8000/v1` |
+| `PHONE_AGENT_MODEL` | Yes | Model name | `autoglm-phone-9b` |
+| `PHONE_AGENT_API_KEY` | No | API key | `EMPTY` |
+| `PHONE_AGENT_PORT` | No | HTTP port | `8000` |
+| `PHONE_AGENT_ENABLE_THINKING` | No | Thinking mode for qwen | `false` |
+| `PHONE_AGENT_MAX_STEPS` | No | Max steps per task | `100` |
+| `PHONE_AGENT_LANG` | No | Language (`cn`/`en`) | `cn` |
 
 ## Troubleshooting
 
-### Device Not Found
+| Issue | Solution |
+|---|---|
+| `adb devices` empty | Check USB cable, USB Debugging enabled, tap "Allow" on phone |
+| Can open apps but can't tap | Enable "USB Debugging (Security Settings)" |
+| Text input not working | Install & enable ADB Keyboard: `adb shell ime enable com.android.adbkeyboard/.AdbIME` |
+| Screenshot black | Sensitive page (payment/bank) — normal, agent handles it |
+| Container keeps restarting | Check port conflict: `docker logs phone-agent`, change `PHONE_AGENT_PORT` |
+| API call timeout | Use async `/api/tasks` endpoints instead of `/api/run` |
 
-```bash
-adb kill-server
-adb start-server
-adb devices
-```
+## Deployment Checklist
 
-Check:
-1. USB debugging enabled
-2. USB cable supports data transfer
-3. Authorization popup approved on phone
-4. Try different USB port/cable
-
-### Can Open Apps but Cannot Tap
-
-Enable both in `Settings > Developer Options`:
-- **USB Debugging**
-- **USB Debugging (Security Settings)**
-
-### Text Input Not Working
-
-1. Ensure ADB Keyboard is installed
-2. Enable in `Settings > System > Language & Input > Virtual Keyboard`
-
-### Windows Encoding Issues
-
-Add environment variable before running:
-
-```bash
-PYTHONIOENCODING=utf-8 python main.py ...
-```
+1. ✅ `adb devices` shows a device
+2. ✅ ADB Keyboard installed and enabled
+3. ✅ `curl /api/health` returns `"status":"ok"`
+4. ✅ A task completes: "打开微信给文件传输助手发消息：部署成功"
 
 ---
 
 # 中文
 
-## 环境要求
+## 概述
 
-### 1. Python 环境
+Open-AutoGLM 是一个手机自动化 Agent。用户说"打开微信给张三发消息"，Agent 自动操作安卓手机完成任务。
 
-需要 Python 3.10 及以上版本。
+**原理**：截图 → 视觉模型理解界面 → 输出操作 → ADB 执行 → 循环
 
-### 2. ADB (Android Debug Bridge)
+本分支增加了 Docker 支持和 HTTP API，适合作为上游 AI Agent 的 skill/tool 使用。
 
-1. 下载官方 ADB [安装包](https://developer.android.com/tools/releases/platform-tools?hl=zh-cn)
-2. 解压并配置环境变量：
+## 部署步骤
 
-**macOS:**
+### 1. 前置检查
 
-```bash
-# 假设解压到 ~/Downloads/platform-tools
-export PATH=${PATH}:~/Downloads/platform-tools
-```
+逐项向用户确认：
 
-**Windows:** 将解压后的文件夹路径添加到系统 PATH。可参考[此教程](https://blog.csdn.net/x2584179909/article/details/108319973)。
+- [ ] 安卓手机 (7.0+)，支持数据传输的 USB 数据线（非仅充电线）
+- [ ] 开发者模式已开启（设置 → 关于手机 → 连续点击版本号 7 次）
+- [ ] USB 调试已开启（设置 → 开发者选项 → USB 调试）
+- [ ] USB 调试（安全设置）已开启（部分机型需要）
+- [ ] ADB Keyboard 已安装：https://github.com/senzhk/ADBKeyBoard/blob/master/ADBKeyboard.apk
+- [ ] 有一个可用的视觉语言模型 API（任意 OpenAI 兼容 VLM：GPT-4o、qwen-vl、AutoGLM-Phone-9B 等）
 
-### 3. 安卓设备配置
-
-要求：
-- Android 7.0+ 设备或模拟器
-- 开发者模式已启用
-- USB 调试已启用
-
-**启用开发者模式：**
-1. 进入 `设置 > 关于手机 > 版本号`
-2. 连续快速点击约 10 次，直到提示"开发者模式已启用"
-
-**启用 USB 调试：**
-1. 进入 `设置 > 开发者选项 > USB 调试`
-2. 开启开关
-3. 部分设备可能需要重启
-
-**请务必检查以下权限：**
-
-![权限](resources/screenshot-20251209-181423.png)
-
-### 4. 安装 ADB Keyboard
-
-在设备上下载并安装 [ADB Keyboard APK](https://github.com/senzhk/ADBKeyBoard/blob/master/ADBKeyboard.apk)。
-
-安装后，在 `设置 > 输入法` 或 `设置 > 键盘列表` 中启用。
-
----
-
-## 安装
+### 2. 宿主机配置（Linux）
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
+# 安装 ADB
+sudo apt install adb -y
 
-# 安装包
-pip install -e .
-```
+# 启动 ADB server
+adb start-server
 
----
-
-## ADB 配置
-
-**请确保 USB 数据线支持数据传输（而非仅充电）。**
-
-### 验证连接
-
-```bash
-# 检查已连接设备
+# USB 连接手机，验证
 adb devices
+# 应显示:  XXXXXXXX    device
 
-# 预期输出：
-# List of devices attached
-# emulator-5554   device
+# 启用 ADB Keyboard
+adb shell ime enable com.android.adbkeyboard/.AdbIME
 ```
 
-### 远程调试（WiFi）
-
-确保手机和电脑在同一 WiFi 网络中。
-
-![开启无线调试](resources/setting.png)
+### 3. 启动容器
 
 ```bash
-# 通过 WiFi 连接（替换为手机显示的 IP 和端口）
-adb connect 192.168.1.100:5555
+docker pull bomomo/phone-agent:latest
 
-# 验证连接
-adb devices
+docker run -d --network host \
+  --name phone-agent \
+  --restart unless-stopped \
+  -e PYTHONUNBUFFERED=1 \
+  -e PHONE_AGENT_PORT=8002 \
+  -e PHONE_AGENT_ENABLE_THINKING=true \
+  -e PHONE_AGENT_BASE_URL=<模型API地址> \
+  -e PHONE_AGENT_MODEL=<模型名称> \
+  -e PHONE_AGENT_API_KEY=<API密钥> \
+  bomomo/phone-agent:latest
 ```
 
-### 设备管理
+### 4. 验证
 
 ```bash
-# 列出所有设备
-adb devices
-
-# 连接远程设备
-adb connect <ip>:<port>
-
-# 断开设备
-adb disconnect <ip>:<port>
+curl http://localhost:8002/api/health
+# → {"status":"ok","adb_available":true,"device_connected":true,"model_configured":true}
 ```
 
----
-
-## 使用方法
-
-### 命令行
+### 5. 执行任务
 
 ```bash
-# 交互模式
-python main.py --base-url <模型API地址> --model <模型名称>
+# 异步（推荐，复杂任务用）
+curl -X POST http://localhost:8002/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"打开微信给文件传输助手发消息：部署成功"}'
 
-# 执行指定任务
-python main.py --base-url <模型API地址> "打开美团搜索附近的火锅店"
-
-# 使用 API Key 认证
-python main.py --apikey sk-xxxxx
-
-# 使用英文系统提示词
-python main.py --lang en --base-url <模型API地址> "Open Chrome browser"
-
-# 列出支持的应用
-python main.py --list-apps
-
-# 指定设备
-python main.py --device-id 192.168.1.100:5555 --base-url <模型API地址> "打开抖音刷视频"
+# 同步（快速任务用）
+curl -X POST http://localhost:8002/api/run \
+  -H "Content-Type: application/json" \
+  -d '{"task":"打开微信给文件传输助手发消息：部署成功"}'
 ```
 
-### Python API
+## API 参考
 
-```python
-from phone_agent import PhoneAgent
-from phone_agent.model import ModelConfig
-
-# 配置模型
-model_config = ModelConfig(
-    base_url="<模型API地址>",
-    model_name="<模型名称>",
-)
-
-# 创建 Agent
-agent = PhoneAgent(model_config=model_config)
-
-# 执行任务
-result = agent.run("打开淘宝搜索无线耳机")
-print(result)
-```
-
----
+详见 [SKILL.md](SKILL.md)，包含完整 API 文档和 Python 集成示例。
 
 ## 环境变量
 
-| 变量                        | 描述               | 默认值                        |
-|---------------------------|------------------|----------------------------|
-| `PHONE_AGENT_BASE_URL`    | 模型 API 地址        | `http://localhost:8000/v1` |
-| `PHONE_AGENT_MODEL`       | 模型名称             | `autoglm-phone-9b`         |
-| `PHONE_AGENT_API_KEY`     | API Key          | `EMPTY`                    |
-| `PHONE_AGENT_MAX_STEPS`   | 每个任务最大步数         | `100`                      |
-| `PHONE_AGENT_DEVICE_ID`   | ADB 设备 ID        | (自动检测)                     |
-| `PHONE_AGENT_LANG`        | 语言 (`cn`/`en`)   | `cn`                       |
-
----
+| 变量 | 必填 | 说明 | 默认值 |
+|---|---|---|---|
+| `PHONE_AGENT_BASE_URL` | 是 | 模型 API 地址 | `http://localhost:8000/v1` |
+| `PHONE_AGENT_MODEL` | 是 | 模型名称 | `autoglm-phone-9b` |
+| `PHONE_AGENT_API_KEY` | 否 | API 密钥 | `EMPTY` |
+| `PHONE_AGENT_PORT` | 否 | HTTP 端口 | `8000` |
+| `PHONE_AGENT_ENABLE_THINKING` | 否 | 千问思考模式 | `false` |
+| `PHONE_AGENT_MAX_STEPS` | 否 | 每任务最大步数 | `100` |
+| `PHONE_AGENT_LANG` | 否 | 语言 (`cn`/`en`) | `cn` |
 
 ## 常见问题
 
-### 设备未找到
+| 问题 | 解决 |
+|---|---|
+| `adb devices` 无输出 | 检查数据线、USB 调试是否开启、手机上点「允许」 |
+| 能打开应用但无法点击 | 开启「USB 调试（安全设置）」 |
+| 文本输入不工作 | 安装并启用 ADB Keyboard |
+| 截图黑屏 | 敏感页面（支付/银行）正常现象 |
+| 容器反复重启 | 检查端口冲突，改 `PHONE_AGENT_PORT` |
+| API 调用超时 | 改用异步 `/api/tasks` 端点 |
 
-```bash
-adb kill-server
-adb start-server
-adb devices
-```
+## 部署验收标准
 
-检查：
-1. USB 调试是否已开启
-2. 数据线是否支持数据传输
-3. 手机上的授权弹窗是否已点击「允许」
-4. 尝试更换 USB 接口或数据线
-
-### 能打开应用但无法点击
-
-在 `设置 > 开发者选项` 中同时启用：
-- **USB 调试**
-- **USB 调试（安全设置）**
-
-### 文本输入不工作
-
-1. 确保已安装 ADB Keyboard
-2. 在 `设置 > 系统 > 语言和输入法 > 虚拟键盘` 中启用
-
-### Windows 编码异常
-
-运行代码前添加环境变量：
-
-```bash
-PYTHONIOENCODING=utf-8 python main.py ...
-```
-
----
-
-## License
-
-This project is for research and learning purposes only. See [Terms of Use](resources/privacy_policy.txt) / [使用条款](resources/privacy_policy.txt).
+1. ✅ `adb devices` 能看到设备
+2. ✅ ADB Keyboard 已安装启用
+3. ✅ `curl /api/health` 返回 `"status":"ok"`
+4. ✅ 一个任务完整执行成功："打开微信给文件传输助手发消息：部署成功"
