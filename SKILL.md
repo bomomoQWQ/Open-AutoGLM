@@ -4,17 +4,39 @@ Phone Agent 是一个手机自动化工具。上级 AI Agent 通过 HTTP API 下
 
 > **推荐使用异步任务 API**，避免复杂任务因超时中断。
 
+## ⚠️ 地址配置（重要）
+
+Phone Agent 使用 `--network host`，占宿主机端口。上级 Agent 连 Phone Agent 的地址取决于部署环境：
+
+| 上级 Agent 在哪 | 用的地址 |
+|---|---|
+| Docker 同宿主机 | `172.17.0.1:8002`（默认 bridge 网关）或宿主机内网 IP |
+| Docker（自定义网络） | `docker inspect bridge \| grep Gateway` 查网关 IP |
+| 非 Docker / 同机 | `localhost:8002` |
+| 远程 | 宿主机内网 IP，如 `192.168.1.100:8002` |
+
+### 快速检测
+
+```bash
+# 在上级 Agent 所在的容器里执行
+curl http://172.17.0.1:8002/api/health
+# 不通就试宿主机内网 IP
+curl http://192.168.1.xxx:8002/api/health
+```
+
 ## API 文档
 
 ### 健康检查
 
 ```bash
-curl http://172.29.0.1:8002/api/health
+curl http://<host>:8002/api/health
 ```
 
 ```json
 {"status": "ok", "adb_available": true, "device_connected": true, "model_configured": true}
 ```
+
+`status` 为 `ok` 时可执行任务，`degraded` 表示组件异常。
 
 ### 异步任务（推荐 ⭐）
 
@@ -23,7 +45,7 @@ curl http://172.29.0.1:8002/api/health
 **1. 启动任务 → 秒回 task_id**
 
 ```bash
-curl -X POST http://172.29.0.1:8002/api/tasks \
+curl -X POST http://<host>:8002/api/tasks \
   -H "Content-Type: application/json" \
   -d '{"task": "打开微信给张三发消息：晚上吃饭", "max_steps": 20}'
 ```
@@ -35,7 +57,7 @@ curl -X POST http://172.29.0.1:8002/api/tasks \
 **2. 轮询进度（建议每 3 秒一次）**
 
 ```bash
-curl http://172.29.0.1:8002/api/tasks/a1b2c3d4e5f6
+curl http://<host>:8002/api/tasks/a1b2c3d4e5f6
 ```
 
 ```json
@@ -49,7 +71,7 @@ curl http://172.29.0.1:8002/api/tasks/a1b2c3d4e5f6
 **3. 取消任务（死循环或不对劲时）**
 
 ```bash
-curl -X DELETE http://172.29.0.1:8002/api/tasks/a1b2c3d4e5f6
+curl -X DELETE http://<host>:8002/api/tasks/a1b2c3d4e5f6
 ```
 
 ```json
@@ -61,7 +83,7 @@ curl -X DELETE http://172.29.0.1:8002/api/tasks/a1b2c3d4e5f6
 ### 同步执行（简单任务可用）
 
 ```bash
-curl -X POST http://172.29.0.1:8002/api/run \
+curl -X POST http://<host>:8002/api/run \
   -H "Content-Type: application/json" \
   -d '{"task": "打开设置", "max_steps": 10}'
 ```
@@ -77,13 +99,21 @@ curl -X POST http://172.29.0.1:8002/api/run \
 ```python
 import requests
 import time
+import os
 
-def run_phone_task(task: str, base_url: str = "http://phone-agent:8002",
-                   max_steps: int = 50, poll_interval: float = 3.0,
-                   cancel_on_error: bool = True) -> dict:
+# 自动检测地址：Docker 环境用 bridge 网关，否则用 localhost
+def _get_base_url():
+    if os.path.exists("/.dockerenv"):
+        return "http://172.17.0.1:8002"   # Docker bridge 网关
+    return "http://localhost:8002"
+
+BASE_URL = os.getenv("PHONE_AGENT_URL", _get_base_url())
+
+def run_phone_task(task: str, max_steps: int = 50,
+                   poll_interval: float = 3.0) -> dict:
     """异步执行手机任务，轮询等待完成。"""
     # 1. 启动
-    r = requests.post(f"{base_url}/api/tasks",
+    r = requests.post(f"{BASE_URL}/api/tasks",
                       json={"task": task, "max_steps": max_steps},
                       timeout=10)
     r.raise_for_status()
@@ -92,17 +122,18 @@ def run_phone_task(task: str, base_url: str = "http://phone-agent:8002",
     # 2. 轮询
     try:
         while True:
-            r = requests.get(f"{base_url}/api/tasks/{task_id}", timeout=10)
+            r = requests.get(f"{BASE_URL}/api/tasks/{task_id}", timeout=10)
             r.raise_for_status()
             data = r.json()
             if data["status"] in ("finished", "error", "cancelled"):
                 return data
             time.sleep(poll_interval)
     except Exception:
-        if cancel_on_error:
-            requests.delete(f"{base_url}/api/tasks/{task_id}")
+        requests.delete(f"{BASE_URL}/api/tasks/{task_id}")
         raise
 ```
+
+也可通过环境变量 `PHONE_AGENT_URL` 显式指定地址。
 
 ## 任务示例
 
