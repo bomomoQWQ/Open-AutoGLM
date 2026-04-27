@@ -50,6 +50,8 @@ set_device_type(DeviceType(_device_type_raw))
 
 app = FastAPI(title="Phone Agent API", version="0.1.0")
 
+_run_lock = threading.Lock()
+
 # ---------------------------------------------------------------------------
 # Task store (async task management)
 # ---------------------------------------------------------------------------
@@ -212,13 +214,16 @@ def health():
 @app.post("/api/run", response_model=RunResponse)
 def run_task(request: RunRequest):
     """Synchronous run. Blocks until task completes. For simple integrations."""
-    _wake_device()
-    agent = _build_agent(request.max_steps)
-    try:
-        result = agent.run(request.task)
-        return RunResponse(success=True, result=result, steps=agent.step_count)
-    except Exception as exc:
-        return RunResponse(success=False, result=str(exc), steps=0)
+    if _run_lock.locked():
+        raise HTTPException(status_code=409, detail="A phone task is already running")
+    with _run_lock:
+        _wake_device()
+        agent = _build_agent(request.max_steps)
+        try:
+            result = agent.run(request.task)
+            return RunResponse(success=True, result=result, steps=agent.step_count)
+        except Exception as exc:
+            return RunResponse(success=False, result=str(exc), steps=0)
 
 
 @app.post("/api/tasks", response_model=TaskResponse)
