@@ -28,6 +28,7 @@ from phone_agent.agent_ios import IOSAgentConfig, IOSPhoneAgent
 from phone_agent.config.apps import list_supported_apps
 from phone_agent.config.apps_harmonyos import list_supported_apps as list_harmonyos_apps
 from phone_agent.config.apps_ios import list_supported_apps as list_ios_apps
+from phone_agent.config.config_loader import load_config
 from phone_agent.device_factory import DeviceType, get_device_factory, set_device_type
 from phone_agent.model import ModelConfig
 from phone_agent.xctest import XCTestConnection
@@ -352,8 +353,40 @@ def check_model_api(base_url: str, model_name: str, api_key: str = "EMPTY") -> b
     return all_passed
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+def parse_args(config: dict | None = None) -> argparse.Namespace:
+    """Parse command line arguments.
+
+    Priority: CLI args > Environment variables > YAML config > hardcoded defaults
+
+    Args:
+        config: Optional dict loaded from YAML config file.
+    """
+    if config is None:
+        config = {}
+
+    model_cfg = config.get("model", {}) or {}
+    device_cfg = config.get("device", {}) or {}
+
+    def _default(env_var: str, yaml_key: str, hardcoded):
+        """Resolve default with priority: env > yaml > hardcoded."""
+        env_val = os.getenv(env_var)
+        if env_val is not None:
+            return env_val
+        yaml_val = model_cfg.get(yaml_key)
+        if yaml_val is not None:
+            return yaml_val
+        return hardcoded
+
+    def _default_device(env_var: str, yaml_key: str, hardcoded):
+        """Resolve device config with priority: env > yaml > hardcoded."""
+        env_val = os.getenv(env_var)
+        if env_val is not None:
+            return env_val
+        yaml_val = device_cfg.get(yaml_key)
+        if yaml_val is not None:
+            return yaml_val
+        return hardcoded
+
     parser = argparse.ArgumentParser(
         description="Phone Agent - AI-powered phone automation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -405,28 +438,28 @@ Examples:
     parser.add_argument(
         "--base-url",
         type=str,
-        default=os.getenv("PHONE_AGENT_BASE_URL", "http://localhost:8000/v1"),
+        default=_default("PHONE_AGENT_BASE_URL", "base_url", "http://localhost:8000/v1"),
         help="Model API base URL",
     )
 
     parser.add_argument(
         "--model",
         type=str,
-        default=os.getenv("PHONE_AGENT_MODEL", "autoglm-phone-9b"),
+        default=_default("PHONE_AGENT_MODEL", "model_name", "autoglm-phone-9b"),
         help="Model name",
     )
 
     parser.add_argument(
         "--apikey",
         type=str,
-        default=os.getenv("PHONE_AGENT_API_KEY", "EMPTY"),
+        default=_default("PHONE_AGENT_API_KEY", "api_key", "EMPTY"),
         help="API key for model authentication",
     )
 
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=int(os.getenv("PHONE_AGENT_MAX_STEPS", "100")),
+        default=int(_default("PHONE_AGENT_MAX_STEPS", "max_steps", "100")),
         help="Maximum steps per task",
     )
 
@@ -435,7 +468,7 @@ Examples:
         "--device-id",
         "-d",
         type=str,
-        default=os.getenv("PHONE_AGENT_DEVICE_ID"),
+        default=_default_device("PHONE_AGENT_DEVICE_ID", "id", None),
         help="ADB device ID",
     )
 
@@ -502,7 +535,7 @@ Examples:
         "--lang",
         type=str,
         choices=["cn", "en"],
-        default=os.getenv("PHONE_AGENT_LANG", "cn"),
+        default=_default("PHONE_AGENT_LANG", "lang", "cn"),
         help="Language for system prompt (cn or en, default: cn)",
     )
 
@@ -510,7 +543,7 @@ Examples:
         "--device-type",
         type=str,
         choices=["adb", "hdc", "ios"],
-        default=os.getenv("PHONE_AGENT_DEVICE_TYPE", "adb"),
+        default=_default_device("PHONE_AGENT_DEVICE_TYPE", "type", "adb"),
         help="Device type: adb for Android, hdc for HarmonyOS, ios for iPhone (default: adb)",
     )
 
@@ -683,7 +716,8 @@ def handle_device_commands(args) -> bool:
 
 def main():
     """Main entry point."""
-    args = parse_args()
+    config = load_config()
+    args = parse_args(config)
 
     # Set device type globally based on args
     if args.device_type == "adb":

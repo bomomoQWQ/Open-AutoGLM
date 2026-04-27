@@ -23,6 +23,7 @@ MESSAGES_ZH = {
     "time_to_first_token": "首 Token 延迟 (TTFT)",
     "time_to_thinking_end": "思考完成延迟",
     "total_inference_time": "总推理时间",
+    "dead_loop_warning": "⚠️ 检测到死循环 (连续3步操作相同且画面无变化)，下轮将注入警告",
 }
 
 # English messages
@@ -48,6 +49,7 @@ MESSAGES_EN = {
     "time_to_first_token": "Time to First Token (TTFT)",
     "time_to_thinking_end": "Time to Thinking End",
     "total_inference_time": "Total Inference Time",
+    "dead_loop_warning": "⚠️ Dead-loop detected (3 consecutive identical actions with no screen change), warning injected",
 }
 
 

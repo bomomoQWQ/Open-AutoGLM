@@ -13,6 +13,63 @@ from phone_agent.model import ModelClient, ModelConfig
 from phone_agent.model.client import MessageBuilder
 
 
+_LOOP_CHECK_WINDOW = 4
+_LOOP_SIMILARITY_THRESHOLD = 0.6
+
+
+def _thinking_similarity(a: str, b: str) -> float:
+    """Compute Jaccard similarity between two thinking texts."""
+    if not a or not b:
+        return 0.0
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union) if union else 0.0
+
+
+def _action_key(action: dict[str, Any] | None) -> str:
+    """Return a stable string key for an action to detect repetition."""
+    if action is None:
+        return "none"
+    act = action.get("action", "")
+    if act in ("Swipe", "Scroll"):
+        start = action.get("start", [])
+        end = action.get("end", [])
+        return f"{act}:{start}:{end}"
+    if act == "Tap":
+        elem = action.get("element", [])
+        return f"{act}:{elem}"
+    return act
+
+
+def _detect_loop(
+    thinking_history: list[str], action_history: list[dict[str, Any] | None]
+) -> bool:
+    """Return True if recent steps form a dead-loop pattern."""
+    n = len(thinking_history)
+    if n < 3:
+        return False
+
+    recent_thinking = thinking_history[-3:]
+    recent_actions = action_history[-3:]
+
+    # Check: last 3 actions are identical
+    action_keys = [_action_key(a) for a in recent_actions]
+    actions_identical = len(set(action_keys)) == 1
+
+    # Check: last 3 thinking texts are pairwise similar
+    similarities = [
+        _thinking_similarity(recent_thinking[i], recent_thinking[i + 1])
+        for i in range(len(recent_thinking) - 1)
+    ]
+    all_similar = all(s >= _LOOP_SIMILARITY_THRESHOLD for s in similarities)
+
+    return actions_identical and all_similar
+
+
 @dataclass
 class AgentConfig:
     """Configuration for the PhoneAgent."""
@@ -80,6 +137,9 @@ class PhoneAgent:
 
         self._context: list[dict[str, Any]] = []
         self._step_count = 0
+        self._thinking_history: list[str] = []
+        self._action_history: list[dict[str, Any] | None] = []
+        self._loop_warning_issued = False
 
     def run(self, task: str) -> str:
         """
@@ -93,6 +153,9 @@ class PhoneAgent:
         """
         self._context = []
         self._step_count = 0
+        self._thinking_history = []
+        self._action_history = []
+        self._loop_warning_issued = False
 
         # First step with user prompt
         result = self._execute_step(task, is_first=True)
@@ -132,6 +195,9 @@ class PhoneAgent:
         """Reset the agent state for a new task."""
         self._context = []
         self._step_count = 0
+        self._thinking_history = []
+        self._action_history = []
+        self._loop_warning_issued = False
 
     def _execute_step(
         self, user_prompt: str | None = None, is_first: bool = False
@@ -161,6 +227,16 @@ class PhoneAgent:
         else:
             screen_info = MessageBuilder.build_screen_info(current_app)
             text_content = f"** Screen Info **\n\n{screen_info}"
+
+            if self._loop_warning_issued:
+                text_content = (
+                    "⚠️  WARNING: The last 3 operations did not change the screen. "
+                    "You are likely stuck in a loop. "
+                    "Try a DIFFERENT approach: scroll in the opposite direction, "
+                    "press Back, or finish the task if you believe it is complete.\n\n"
+                    + text_content
+                )
+                self._loop_warning_issued = False
 
             self._context.append(
                 MessageBuilder.create_user_message(
@@ -193,6 +269,17 @@ class PhoneAgent:
             if self.agent_config.verbose:
                 traceback.print_exc()
             action = finish(message=response.action)
+
+        # Track history & detect dead-loop
+        self._thinking_history.append(response.thinking)
+        self._action_history.append(action)
+        if not self._loop_warning_issued and _detect_loop(
+            self._thinking_history, self._action_history
+        ):
+            self._loop_warning_issued = True
+            if self.agent_config.verbose:
+                msgs = get_messages(self.agent_config.lang)
+                print(f"\n⚠️  {msgs.get('dead_loop_warning', 'Dead-loop detected, warning will be injected next step.')}")
 
         if self.agent_config.verbose:
             # Print thinking process

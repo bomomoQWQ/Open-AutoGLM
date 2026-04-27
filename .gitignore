@@ -59,5 +59,8 @@ screenshots/
 call_model.py
 app_package_name.py
 
+# User config (contains API keys)
+/config.yaml
+
 .claude/
 .venv
