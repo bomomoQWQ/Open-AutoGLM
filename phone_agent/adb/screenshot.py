@@ -65,12 +65,19 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
         if not os.path.exists(temp_path):
             return _create_fallback_screenshot(is_sensitive=False)
 
-        # Read and encode image
+        # Read image, resize for efficiency, encode as compressed JPEG
         img = Image.open(temp_path)
         width, height = img.size
 
+        # Resize to ~720p width while keeping aspect ratio
+        if width > 720:
+            new_width = 720
+            new_height = int(720 * height / width)
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+            width, height = new_width, new_height
+
         buffered = BytesIO()
-        img.save(buffered, format="PNG")
+        img.save(buffered, format="JPEG", quality=80)
         base64_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         # Cleanup
