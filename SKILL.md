@@ -136,12 +136,13 @@ curl -X POST http://<host>:8002/api/run \
 
 ⚠️ 任务超过 HTTP 超时会断开，建议只用快速任务。
 
-### Python 调用示例
+### Python 调用示例（生产级，含总超时+重试上限）
 
 ```python
 import requests
 import time
 import os
+import sys
 
 def _get_base_url():
     if os.path.exists("/.dockerenv"):
@@ -151,16 +152,28 @@ def _get_base_url():
 BASE_URL = os.getenv("PHONE_AGENT_URL", _get_base_url())
 
 def run_phone_task(task: str, max_steps: int = 50,
-                   poll_interval: float = 3.0) -> dict:
-    """异步执行手机任务，轮询等待完成。"""
+                   poll_interval: float = 3.0,
+                   total_timeout: float = 180.0) -> dict:
+    """异步执行手机任务，轮询等待完成。
+    - total_timeout: 整个任务的最大等待时间（秒），超时自动取消
+    """
+    # 1. 启动任务
     r = requests.post(f"{BASE_URL}/api/tasks",
                       json={"task": task, "max_steps": max_steps},
                       timeout=10)
     r.raise_for_status()
     task_id = r.json()["task_id"]
+    print(f"task_id={task_id}", flush=True)  # flush 防止缓冲吞输出
 
+    # 2. 轮询（有总超时保护）
+    started = time.time()
     try:
         while True:
+            elapsed = time.time() - started
+            if elapsed > total_timeout:
+                requests.delete(f"{BASE_URL}/api/tasks/{task_id}", timeout=5)
+                return {"status": "timeout", "result": f"Task timed out after {total_timeout}s", "steps": 0}
+
             r = requests.get(f"{BASE_URL}/api/tasks/{task_id}", timeout=10)
             r.raise_for_status()
             data = r.json()
@@ -168,9 +181,14 @@ def run_phone_task(task: str, max_steps: int = 50,
                 return data
             time.sleep(poll_interval)
     except Exception:
-        requests.delete(f"{BASE_URL}/api/tasks/{task_id}")
+        try:
+            requests.delete(f"{BASE_URL}/api/tasks/{task_id}", timeout=5)
+        except Exception:
+            pass
         raise
 ```
+
+> **直接复制上面函数**，不要自己写轮询逻辑。已经加了 total_timeout 保护、task_id 打印、异常自动取消。
 
 也可通过环境变量 `PHONE_AGENT_URL` 显式指定地址。
 
