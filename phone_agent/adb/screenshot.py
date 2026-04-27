@@ -14,12 +14,19 @@ from PIL import Image
 
 @dataclass
 class Screenshot:
-    """Represents a captured screenshot."""
+    """Represents a captured screenshot.
+
+    width/height are the dimensions sent to the VLM (may be resized).
+    original_width/original_height are the physical phone screen dimensions
+    and must be used for ADB coordinate mapping.
+    """
 
     base64_data: str
     width: int
     height: int
     is_sensitive: bool = False
+    original_width: int = 0
+    original_height: int = 0
 
 
 def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screenshot:
@@ -67,13 +74,14 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
 
         # Read image, resize for efficiency, encode as compressed JPEG
         img = Image.open(temp_path)
-        width, height = img.size
+        orig_width, orig_height = img.size
+        width, height = orig_width, orig_height
 
         # Convert RGBA/P to RGB (JPEG doesn't support alpha)
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
 
-        # Resize to ~720p width while keeping aspect ratio
+        # Resize to ~720p width while keeping aspect ratio (for VLM, saves tokens)
         if width > 720:
             new_width = 720
             new_height = int(720 * height / width)
@@ -88,7 +96,12 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
         os.remove(temp_path)
 
         return Screenshot(
-            base64_data=base64_data, width=width, height=height, is_sensitive=False
+            base64_data=base64_data,
+            width=width,
+            height=height,
+            is_sensitive=False,
+            original_width=orig_width,
+            original_height=orig_height,
         )
 
     except Exception as e:
