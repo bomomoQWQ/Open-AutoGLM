@@ -153,7 +153,7 @@ BASE_URL = os.getenv("PHONE_AGENT_URL", _get_base_url())
 
 def run_phone_task(task: str, max_steps: int = 50,
                    poll_interval: float = 3.0,
-                   total_timeout: float = 180.0) -> dict:
+                   total_timeout: float = 300.0) -> dict:
     """异步执行手机任务，轮询等待完成。
     - total_timeout: 整个任务的最大等待时间（秒），超时自动取消
     """
