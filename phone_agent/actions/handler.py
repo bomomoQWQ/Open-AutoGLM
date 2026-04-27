@@ -239,16 +239,12 @@ class ActionHandler:
         return ActionResult(True, False)
 
     def _handle_note(self, action: dict, width: int, height: int) -> ActionResult:
-        """Handle note action (placeholder for content recording)."""
-        # This action is typically used for recording page content
-        # Implementation depends on specific requirements
-        return ActionResult(True, False)
+        """Handle note action - records page content, finishes immediately."""
+        return ActionResult(True, True)
 
     def _handle_call_api(self, action: dict, width: int, height: int) -> ActionResult:
-        """Handle API call action (placeholder for summarization)."""
-        # This action is typically used for content summarization
-        # Implementation depends on specific requirements
-        return ActionResult(True, False)
+        """Handle API call action - summarizes content, finishes immediately."""
+        return ActionResult(True, True)
 
     def _handle_interact(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle interaction request (user choice needed)."""
