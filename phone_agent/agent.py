@@ -140,6 +140,7 @@ class PhoneAgent:
         self._thinking_history: list[str] = []
         self._action_history: list[dict[str, Any] | None] = []
         self._loop_warning_issued = False
+        self._loop_abort_count = 0
 
     def run(self, task: str) -> str:
         """
@@ -156,6 +157,7 @@ class PhoneAgent:
         self._thinking_history = []
         self._action_history = []
         self._loop_warning_issued = False
+        self._loop_abort_count = 0
 
         # First step with user prompt
         result = self._execute_step(task, is_first=True)
@@ -198,6 +200,7 @@ class PhoneAgent:
         self._thinking_history = []
         self._action_history = []
         self._loop_warning_issued = False
+        self._loop_abort_count = 0
 
     def _execute_step(
         self, user_prompt: str | None = None, is_first: bool = False
@@ -273,13 +276,22 @@ class PhoneAgent:
         # Track history & detect dead-loop
         self._thinking_history.append(response.thinking)
         self._action_history.append(action)
-        if not self._loop_warning_issued and _detect_loop(
-            self._thinking_history, self._action_history
-        ):
-            self._loop_warning_issued = True
+        _MAX_LOOP_WARNINGS = 6
+        if _detect_loop(self._thinking_history, self._action_history):
+            self._loop_abort_count += 1
+            if self._loop_abort_count >= _MAX_LOOP_WARNINGS:
+                action = finish(
+                    message=f"Task aborted: dead-loop detected {self._loop_abort_count} times consecutively. "
+                            "The same operation keeps repeating without changing the screen."
+                )
+            elif not self._loop_warning_issued:
+                self._loop_warning_issued = True
             if self.agent_config.verbose:
                 msgs = get_messages(self.agent_config.lang)
-                print(f"\n⚠️  {msgs.get('dead_loop_warning', 'Dead-loop detected, warning will be injected next step.')}")
+                print(f"\n⚠️  {msgs.get('dead_loop_warning', 'Dead-loop detected, warning will be injected next step.')} (count={self._loop_abort_count})")
+        else:
+            self._loop_abort_count = 0
+            self._loop_warning_issued = False
 
         if self.agent_config.verbose:
             # Print thinking process
