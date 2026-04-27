@@ -69,6 +69,10 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
         img = Image.open(temp_path)
         width, height = img.size
 
+        # Convert RGBA/P to RGB (JPEG doesn't support alpha)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
         # Resize to ~720p width while keeping aspect ratio
         if width > 720:
             new_width = 720
