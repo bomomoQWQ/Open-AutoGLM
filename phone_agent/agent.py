@@ -60,18 +60,18 @@ def _detect_loop(
     recent_thinking = thinking_history[-3:]
     recent_actions = action_history[-3:]
 
-    # Check: last 3 actions are identical
+    # Check: last 3 actions are identical, OR last 3 thinking texts are pairwise similar.
+    # Either condition alone signals a potential loop.
     action_keys = [_action_key(a) for a in recent_actions]
     actions_identical = len(set(action_keys)) == 1
 
-    # Check: last 3 thinking texts are pairwise similar
     similarities = [
         _thinking_similarity(recent_thinking[i], recent_thinking[i + 1])
         for i in range(len(recent_thinking) - 1)
     ]
     all_similar = all(s >= _LOOP_SIMILARITY_THRESHOLD for s in similarities)
 
-    return actions_identical and all_similar
+    return actions_identical or all_similar
 
 
 @dataclass
