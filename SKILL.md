@@ -174,6 +174,18 @@ def run_phone_task(task: str, max_steps: int = 50,
 
 也可通过环境变量 `PHONE_AGENT_URL` 显式指定地址。
 
+> ⚠️ **必须用 Python SDK 封装，不要手动 curl + sleep 轮询。**
+> curl 轮询每次起 HTTP 连接开销大，sleep 间隔太长浪费 time，太短浪费调用次数。
+> 把上面的 `run_phone_task()` 函数复制到你的代码里直接用。
+
+### max_steps 建议
+
+| 任务复杂度 | 建议 max_steps | 示例 |
+|---|---|---|
+| 简单 | 5-10 | 打开 App、返回桌面、打开设置 |
+| 中等 | 15-25 | 搜索发消息、WiFi 连接、进店铺找商品 |
+| 复杂 | 30-50 | 清后台、浏览翻找多页内容、多步骤嵌套操作 |
+
 ## 任务示例
 
 | 场景 | task |
